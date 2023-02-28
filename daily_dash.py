@@ -15,8 +15,9 @@ from PIL import Image
 from reportlab.lib.utils import ImageReader
 from PIL import Image
 import streamlit as st
+import os
+import plotly.io as pio
 from io import BytesIO
-
 
 
 def image_combiner_sidebyside(jpeg_images):
@@ -363,19 +364,22 @@ def create_pdf_report(dict_final):
     'underline': True,
     'align': 'CENTER'}
     # create a new PDF with a title
+    # Create a BytesIO object to store the PDF content as bytes
+    buffer = BytesIO()
     today = date.today().strftime("%B %d, %Y")
-    c = canvas.Canvas(f"Daily Status Report({today}).pdf", pagesize=letter)
+    file_name = f"Daily Status Report({today}).pdf"
+    c = canvas.Canvas(buffer, pagesize=letter)
     c.setTitle("Daily report({today})")
-    c.setPageCompression(9)
+    c.setPageCompression(3)
     # draw the first page with image1 and text1
     
-
     selected_data = [data.split("_")[0].strip() for data in dict_final.keys()]
     my_dict = {elem: None for elem in selected_data}
     # Convert the dictionary back to a list
     selected_data = list(my_dict.keys())
     for selected_data in selected_data:
         result = {k: v for k, v in dict_final.items() if k.startswith(selected_data)}
+        c.setPageCompression(3)
         c.setFont(header_style["font"], header_style["fontsize"])
         c.drawCentredString(letter[0] / 2, 750, f"{selected_data} Detailed Report as on {today}")
         for combined_image in result.values():
@@ -383,17 +387,24 @@ def create_pdf_report(dict_final):
             c.drawImage(image_reader, 0, 0, width=letter[0], height=(letter[1] - header_style["fontsize"] - inch))
             c.showPage()
     c.save()
-    return f"Daily Status Report({today}).pdf"
+    # Save the PDF content to the BytesIO object
+    pdf_bytes = buffer.getvalue()
+    
+    return file_name, pdf_bytes
 
 def create_html(html_images_main):
-    with open(f'Daily Status Report({date.today().strftime("%B %d, %Y")}).html', 'w') as f:
-        for fig in html_images_main:
-            f.write(fig.to_html(full_html=False, include_plotlyjs='cdn'))
-    return f'Daily Status Report({date.today().strftime("%B %d, %Y")}).html'
+    html_file_name = f'Daily Status Report({date.today().strftime("%B %d, %Y")}).html'
+    html_str = ''
+    for fig in html_images_main:
+        html_str += fig.to_html(full_html=False, include_plotlyjs='cdn')
+
+    # Create a BytesIO object to store the HTML content as bytes
+    html_bytes = html_str.encode()
+    return html_file_name, html_bytes
 
 @st.cache
 def load_images():
-    return Image.open("dash.jpeg")
+    return Image.open("dash.jpeg"), os.path.join(os.path.expanduser("~"), "Downloads")
 
 @st.cache
 def get_app_data(file):
@@ -402,7 +413,8 @@ def get_app_data(file):
         st.error('🚩️Error: Please select a valid Excel file')
         error_flag = "X"
     if not error_flag:
-        # Load the Excel workbook
+        # Load the Excel workbook        
+        pio.renderers.default = "iframe_connected"
         workbook = openpyxl.load_workbook(file)
         # Get all the sheet names in the workbook
         sheet_names = workbook.sheetnames
@@ -436,9 +448,9 @@ def get_app_data(file):
         dict_visa_transfer_main,visatransfer_html_images = visa_transfer(df_all,sheet_names)
         dict_final.update(dict_visa_transfer_main)
         html_images_main.extend(visatransfer_html_images)    
-        pdf_file_name = create_pdf_report(dict_final)
-        html_file_name = create_html(html_images_main)    
-        return pdf_file_name,html_file_name
+        pdf_file_name,pdf_bytes = create_pdf_report(dict_final)
+        html_file_name, html_bytes = create_html(html_images_main)    
+        return pdf_file_name,pdf_bytes, html_file_name, html_bytes
 
 def process_run():
     st.write('---')
@@ -448,19 +460,29 @@ def process_run():
     file = st.file_uploader('Select an Excel file', type=['xlsx', 'xls'])
     # Validate the file path selected by the user
     st.write('---')
-    if file and st.button("Generate Report📝", key="but"):
-        st.subheader("Select the Below Button to Generate/Download the Reports 👇:")
+    if file:
         with st.spinner('Please Wait ⌛...Generating Report📝'):
-            pdf_name, html_name = get_app_data(file)
+            pdf_file_name,pdf_bytes, html_file_name, html_bytes = get_app_data(file)
             st.success("Daily Status Reports Generated Successfully")
-            st.success(f"**PDF File name: **{pdf_name}")
-            st.success(f"**HTML File name: **{html_name}")
+            st.subheader("Select the Below Buttons to Download the Reports 👇:")
+            if st.download_button(label="Download HTML Report",
+            data=BytesIO(html_bytes).getvalue(),
+            file_name=html_file_name,
+            mime="text/html",
+            ):
+                st.success(f"**{html_file_name}** saved sucessfully")
+            if st.download_button(
+            label="Download PDF Report",
+            data=pdf_bytes,
+            file_name=pdf_file_name,
+            mime="application/pdf",
+            ):
+                st.success(f"**{pdf_file_name}** saved sucessfully")
     return None
 
 st.set_page_config(page_title='Daily Status Report',page_icon ="📝",layout="wide")
 st.title("Daily 🗓️ Status Report 📊 Generation App")
-image = load_images()
+image,down_path = load_images()
 st.image(image, width=200)
 process_run()
-
 
